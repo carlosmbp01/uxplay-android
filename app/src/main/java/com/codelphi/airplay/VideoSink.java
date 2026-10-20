@@ -67,7 +67,12 @@ public class VideoSink {
     }
 
     public void push(byte[] nal) {
-        if (!running) return;
+        if (!running) {
+            /* 会话结束后已停机；新会话首帧到达即自动重启（csd 已缓存，Surface 仍有效时可立即出画） */
+            if (surface == null || !surface.isValid()) return;
+            start(h265, surface);
+            if (!running) return;
+        }
         byte[] annexb = avccToAnnexB(nal);
         extractSpsPps(annexb);
         if (!csdConfigured && spsNal != null && ppsNal != null) {

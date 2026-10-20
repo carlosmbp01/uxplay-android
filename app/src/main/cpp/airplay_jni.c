@@ -26,6 +26,7 @@ jmethodID g_m_register_airplay = NULL;
 jmethodID g_m_push_video = NULL;
 jmethodID g_m_push_audio = NULL;
 jmethodID g_m_set_volume = NULL;
+jmethodID g_m_session_end = NULL;
 
 static raop_t *raop = NULL;
 static dnssd_t *dnssd = NULL;
@@ -49,7 +50,15 @@ void bridge_attach_env(JNIEnv **env) {
 /* ---------- raop 回调 ---------- */
 
 static void conn_init(void *cls) { LOGI("客户端连接"); (void) cls; }
-static void conn_destroy(void *cls) { LOGI("客户端断开"); (void) cls; }
+static void conn_destroy(void *cls) {
+    (void) cls;
+    LOGI("客户端断开");
+    JNIEnv *env = NULL;
+    bridge_attach_env(&env);
+    if (!env || !g_bridge_cls || !g_m_session_end) return;
+    (*env)->CallStaticVoidMethod(env, g_bridge_cls, g_m_session_end);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+}
 static void conn_reset(void *cls, int reason) { (void) cls; (void) reason; }
 
 static void audio_process(void *cls, raop_ntp_t *ntp, audio_decode_struct *data) {
@@ -256,7 +265,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_m_push_video = (*env)->GetStaticMethodID(env, cls, "cPushVideo", "([BI)V");
     g_m_push_audio = (*env)->GetStaticMethodID(env, cls, "cPushAudio", "([BIB)V");
     g_m_set_volume = (*env)->GetStaticMethodID(env, cls, "cSetVolume", "(F)V");
-    if (!g_m_register_raop || !g_m_register_airplay || !g_m_push_video || !g_m_push_audio || !g_m_set_volume)
+    g_m_session_end = (*env)->GetStaticMethodID(env, cls, "cSessionEnd", "()V");
+    if (!g_m_register_raop || !g_m_register_airplay || !g_m_push_video || !g_m_push_audio || !g_m_set_volume || !g_m_session_end)
         return JNI_ERR;
     return JNI_VERSION_1_6;
 }

@@ -18,10 +18,14 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     private final Handler uiHandler = new Handler();
     private long lastBack;
 
-    /* 镜像中每秒检查一次：有帧 → 隐藏状态文字；无帧 → 显示等待提示 */
+    /* 镜像中每秒检查一次：有帧 → 隐藏状态文字；无帧 → 显示等待提示。
+       conn_destroy 正常通知会话结束；此处轮询是异常断开（无 FIN）时的兜底 */
+    private boolean wasMirroring;
     private final Runnable uiTick = new Runnable() {
         @Override public void run() {
             boolean mirroring = NativeBridge.videoIdleMs() < 3000;
+            if (wasMirroring && !mirroring) showWaitingScreen();
+            wasMirroring = mirroring;
             status.setVisibility(mirroring ? View.GONE : View.VISIBLE);
             if (!mirroring) status.setText("等待 iPhone/Mac 连接…");
             uiHandler.postDelayed(this, 1000);
@@ -38,6 +42,7 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
         status = findViewById(R.id.status);
 
         NativeBridge.setListener(this);
+        NativeBridge.setSessionEndListener(this::showWaitingScreen);
 
         surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override public void surfaceCreated(SurfaceHolder holder) {
@@ -74,6 +79,7 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     @Override
     protected void onDestroy() {
         uiHandler.removeCallbacksAndMessages(null);
+        NativeBridge.setSessionEndListener(null);   /* 静态槽位持 Activity 引用，销毁时清掉防泄漏 */
         super.onDestroy();
     }
 
@@ -90,5 +96,29 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     @Override
     public void onLog(String msg) {
         runOnUiThread(() -> status.setText(msg));
+    }
+
+    /** Mac 退出镜像/断开：停掉解码器并清掉 Surface 上的残留帧，回退到等待连接画面。
+       新会话首帧到达时 VideoSink.push 会自动重启解码器 */
+    private void showWaitingScreen() {
+        NativeBridge.getVideoSink().stop();
+        runOnUiThread(() -> {
+            clearSurfaceToBlack();
+            status.setText("等待 iPhone/Mac 连接…");
+            status.setVisibility(View.VISIBLE);
+        });
+    }
+
+    private void clearSurfaceToBlack() {
+        try {
+            SurfaceHolder h = surfaceView.getHolder();
+            if (!h.getSurface().isValid()) return;
+            android.graphics.Canvas c = h.lockCanvas(null);
+            if (c == null) return;
+            c.drawColor(android.graphics.Color.BLACK);
+            h.unlockCanvasAndPost(c);
+        } catch (Exception e) {
+            android.util.Log.w("MirrorActivity", "清除残留画面失败", e);
+        }
     }
 }
