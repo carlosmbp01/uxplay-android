@@ -4,10 +4,12 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
+import android.view.Gravity;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -38,6 +40,8 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
         status = findViewById(R.id.status);
 
         NativeBridge.setListener(this);
+        /* 解码器报出真实分辨率后按比例重排 SurfaceView：保持宽高比居中，多余部分留黑边，绝不拉伸 */
+        VideoSink.setVideoSizeListener((w, h) -> runOnUiThread(() -> applyLetterbox(w, h)));
 
         surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override public void surfaceCreated(SurfaceHolder holder) {
@@ -74,7 +78,31 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     @Override
     protected void onDestroy() {
         uiHandler.removeCallbacksAndMessages(null);
+        VideoSink.setVideoSizeListener(null);   /* Activity 可重建，避免持着旧实例泄漏 */
         super.onDestroy();
+    }
+
+    /** letterbox 等比缩放：视频比例与屏幕一致时恢复满屏；不一致时居中 + 黑边（更宽→上下黑边，更窄→左右黑边） */
+    private void applyLetterbox(int vw, int vh) {
+        if (vw <= 0 || vh <= 0 || surfaceView == null) return;
+        android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+        int sw = dm.widthPixels, sh = dm.heightPixels;
+        if (sw <= 0 || sh <= 0) return;
+        double videoAr = (double) vw / vh;
+        double screenAr = (double) sw / sh;
+        int w, h;
+        if (videoAr > screenAr) {
+            w = sw;
+            h = (int) Math.round(sw / videoAr);
+        } else {
+            h = sh;
+            w = (int) Math.round(sh * videoAr);
+        }
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h);
+        lp.gravity = Gravity.CENTER;
+        surfaceView.setLayoutParams(lp);
+        android.util.Log.i("MirrorActivity", "letterbox: 视频 " + vw + "x" + vh + " → 显示 " + w + "x" + h + " (屏 " + sw + "x" + sh + ")");
     }
 
     @Override
