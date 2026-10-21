@@ -7,3 +7,4 @@ captures/
 build/
 app/.cxx/
 *.log
+.mimosa/
