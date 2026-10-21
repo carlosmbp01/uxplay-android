@@ -53,13 +53,19 @@ utils_read_file(char **dst, const char *filename)
     }
 
     /* Find out file size */
-    fseek(stream, 0, SEEK_END);
+    if (fseek(stream, 0, SEEK_END) != 0) {
+        fclose(stream);
+        return -1;
+    }
     int filesize = ftell(stream);
     if (filesize < 0) {
         fclose(stream);
         return -1;
     }
-    fseek(stream, 0, SEEK_SET);
+    if (fseek(stream, 0, SEEK_SET) != 0) {
+        fclose(stream);
+        return -1;
+    }
 
     /* Allocate one extra byte for zero */
     char *buffer = malloc(filesize+1);
@@ -74,7 +80,12 @@ utils_read_file(char **dst, const char *filename)
         int ret = fread(buffer+read_bytes, 1,
                         filesize-read_bytes, stream);
         if (ret == 0) {
-            break;
+            if (ferror(stream)) {
+                free(buffer);
+                fclose(stream);
+                return -3;
+            }
+            break;   /* EOF */
         }
         read_bytes += ret;
     } while (read_bytes < filesize);
