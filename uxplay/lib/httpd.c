@@ -497,7 +497,6 @@ httpd_thread(void *arg)
              * such messages start with "HTTP/1.1" (or sometimes with "EVENT/1.0")  */
             if (new_request) {
                 int readstart = 0;
-                new_request = 0;
                 while (readstart < 8) {
                     int ret = recv(connection->socket_fd, buffer + readstart, sizeof(buffer) - readstart, 0);
                     if (ret == 0) {

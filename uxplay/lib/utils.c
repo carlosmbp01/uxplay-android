@@ -55,6 +55,10 @@ utils_read_file(char **dst, const char *filename)
     /* Find out file size */
     fseek(stream, 0, SEEK_END);
     int filesize = ftell(stream);
+    if (filesize < 0) {
+        fclose(stream);
+        return -1;
+    }
     fseek(stream, 0, SEEK_SET);
 
     /* Allocate one extra byte for zero */

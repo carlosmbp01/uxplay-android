@@ -206,7 +206,6 @@ void cycle(unsigned char* block, uint32_t key_schedule[11][4])
    uint32_t ptr3 = 0;
    uint32_t ptr4 = 0;
    uint32_t ab;
-   unsigned char* buffer = (unsigned char*)&ab;
    uint32_t* bWords = (uint32_t*)block;
    bWords[0] ^= key_schedule[10][0];
    bWords[1] ^= key_schedule[10][1];
