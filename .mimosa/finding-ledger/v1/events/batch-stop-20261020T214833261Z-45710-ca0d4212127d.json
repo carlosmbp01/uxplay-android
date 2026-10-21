@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20261020T214833261Z-45710-ca0d4212127d",
+  "runId": "20261020T214833261Z-45710-ca0d4212127d",
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "79ed26f5b326495c872f9b12f5e7c3dc6ce3fc7f",
+  "diffHash": "8ec5b2e44f3b476b8511f0be9275b57f0e5d1932971e9240affce38eaf9f99f3",
+  "rulesVersion": "unavailable",
+  "sessionHash": "c91d1f4c73ff6468b9c94c7b62988d3a3e097689fcb3d858aba06c36b4491c56",
+  "reportRef": ".mimosa/reports/task-review-session_20c12a158955e608e9b22101901b4675-20261020T214833261Z-45710-ca0d4212127d.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "app/src/main/cpp/airplay_jni.c",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "app/src/main/java/com/codelphi/airplay/NativeBridge.java",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "app/src/main/java/com/codelphi/airplay/MirrorActivity.java",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "app/src/main/java/com/codelphi/airplay/VideoSink.java",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-10-20T21:48:33.595Z"
+}

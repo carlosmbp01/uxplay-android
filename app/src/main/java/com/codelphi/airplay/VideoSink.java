@@ -10,6 +10,14 @@ import java.util.concurrent.LinkedBlockingQueue;
 /** 视频解码驱动：C 侧 NALU → AvCC→AnnexB 转换 → MediaCodec（csd 惰性配置）→ Surface */
 public class VideoSink {
 
+    /** 视频真实分辨率回调（UI 层据此做 letterbox 等比缩放，避免拉伸） */
+    public interface VideoSizeListener { void onVideoSize(int width, int height); }
+
+    private static volatile VideoSizeListener sizeListener;
+    private int lastReportedW, lastReportedH;
+
+    public static void setVideoSizeListener(VideoSizeListener l) { sizeListener = l; }
+
     private final LinkedBlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(16);
     private MediaCodec codec;
     private Thread thread;
@@ -135,6 +143,30 @@ public class VideoSink {
         queue.clear();
     }
 
+    /** 从输出格式解析实际显示尺寸：优先 crop 裁剪框（硬解常带对齐 padding），否则退回 width/height */
+    private static int[] displaySizeOf(MediaFormat f) {
+        int w = -1, h = -1;
+        try {
+            if (f.containsKey("crop-right") && f.containsKey("crop-left"))
+                w = f.getInteger("crop-right") - f.getInteger("crop-left") + 1;
+            else if (f.containsKey("width")) w = f.getInteger("width");
+            if (f.containsKey("crop-bottom") && f.containsKey("crop-top"))
+                h = f.getInteger("crop-bottom") - f.getInteger("crop-top") + 1;
+            else if (f.containsKey("height")) h = f.getInteger("height");
+        } catch (Exception ignored) { }
+        return new int[]{w, h};
+    }
+
+    /** 分辨率没变化不重复通知；iPhone 横竖屏切换、iPad 接入都会带新分辨率进来 */
+    private void reportVideoSize(int w, int h) {
+        if (w <= 0 || h <= 0) return;
+        if (w == lastReportedW && h == lastReportedH) return;
+        lastReportedW = w;
+        lastReportedH = h;
+        VideoSizeListener l = sizeListener;
+        if (l != null) l.onVideoSize(w, h);
+    }
+
     /** 热循环：立即吞下全部输入并榨干全部输出（60fps 镜像流不能按 50ms 轮询慢慢来） */
     private void loop() {
         try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Exception ignored) { }
@@ -167,7 +199,10 @@ public class VideoSink {
                         if (!fed) Thread.sleep(10);
                         break;
                     } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        android.util.Log.i("VideoSink", "格式: " + codec.getOutputFormat());
+                        MediaFormat f = codec.getOutputFormat();
+                        int[] disp = displaySizeOf(f);
+                        android.util.Log.i("VideoSink", "格式: " + f + " → 显示 " + disp[0] + "x" + disp[1]);
+                        reportVideoSize(disp[0], disp[1]);
                     } else break;
                 }
                 if (!fed && !got) Thread.sleep(10);   /* 空闲降温 */
