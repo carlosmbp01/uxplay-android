@@ -74,21 +74,14 @@ utils_read_file(char **dst, const char *filename)
         return -2;
     }
 
-    /* Read data in a loop to buffer */
-    int read_bytes = 0;
-    do {
-        int ret = fread(buffer+read_bytes, 1,
-                        filesize-read_bytes, stream);
-        if (ret == 0) {
-            if (ferror(stream)) {
-                free(buffer);
-                fclose(stream);
-                return -3;
-            }
-            break;   /* EOF */
-        }
-        read_bytes += ret;
-    } while (read_bytes < filesize);
+    /* Read whole file in one call; the file is seekable (fopen "rb" + fseek above),
+       so a single fread is sufficient */
+    int read_bytes = (int) fread(buffer, 1, filesize, stream);
+    if (read_bytes != filesize || ferror(stream)) {
+        free(buffer);
+        fclose(stream);
+        return -3;
+    }
 
     /* Add final null byte and close stream */
     buffer[read_bytes] = '\0';
