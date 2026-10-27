@@ -31,6 +31,8 @@ public class VideoSink {
 
     public synchronized boolean isRunning() { return running; }
 
+    private long retryAfter;   /* 启动失败后退避，避免每帧重试刷屏 */
+
     public synchronized void start(boolean h265, Surface surface) {
         stop();
         this.h265 = h265;
@@ -38,9 +40,11 @@ public class VideoSink {
         try {
             createCodec();
             running = true;
-            thread = new Thread(this::loop, "videosink");
+            final MediaCodec c = codec;
+            thread = new Thread(() -> loop(c), "videosink");
             thread.start();
         } catch (Exception e) {
+            retryAfter = System.currentTimeMillis() + 1000;
             android.util.Log.e("VideoSink", "启动失败", e);
         }
     }
@@ -52,41 +56,33 @@ public class VideoSink {
             fmt.setByteBuffer("csd-0", ByteBuffer.wrap(spsNal));
             fmt.setByteBuffer("csd-1", ByteBuffer.wrap(ppsNal));
         }
-        codec = MediaCodec.createDecoderByType(mime);
-        codec.configure(fmt, surface, null, 0);
-        codec.start();
-    }
-
-    private void reconfigureWithCsd() {
-        csdConfigured = true;
-        running = false;
-        queue.clear();
-        if (thread != null) { thread.interrupt(); try { thread.join(500); } catch (InterruptedException ignored) { } thread = null; }
-        if (codec != null) { try { codec.stop(); codec.release(); } catch (Exception ignored) { } codec = null; }
+        MediaCodec c = MediaCodec.createDecoderByType(mime);
         try {
-            running = true;
-            createCodec();
-            thread = new Thread(this::loop);
-            thread.start();
-            android.util.Log.i("VideoSink", "已用 csd 重配置解码器");
+            c.configure(fmt, surface, null, 0);
+            c.start();
         } catch (Exception e) {
-            android.util.Log.e("VideoSink", "csd 重配置失败", e);
+            try { c.release(); } catch (Exception ignored) { }   /* 失败也必须释放，否则占着 Surface */
+            throw e;
         }
+        codec = c;
     }
 
-    public void push(byte[] nal) {
+    public synchronized void push(byte[] nal) {
         if (!running) {
-            /* 会话结束后已停机；新会话首帧到达即自动重启（csd 已缓存，Surface 仍有效时可立即出画） */
+            /* 会话结束或解码器故障后停机；新帧到达即自动重启（csd 已缓存） */
             if (surface == null || !surface.isValid()) return;
+            if (System.currentTimeMillis() < retryAfter) return;
             start(h265, surface);
             if (!running) return;
         }
         byte[] annexb = avccToAnnexB(nal);
         extractSpsPps(annexb);
         if (!csdConfigured && spsNal != null && ppsNal != null) {
-            reconfigureWithCsd();   /* MTK 等硬解器需要 configure 时携带 csd */
+            csdConfigured = true;   /* MTK 等硬解器需要 configure 时携带 csd */
+            start(h265, surface);
+            if (!running) return;
         }
-        if (running) queue.offer(annexb);
+        if (!queue.offer(annexb)) { queue.poll(); queue.offer(annexb); }   /* 满了丢最旧，不卡 */
     }
 
     /** 从 Annex-B 流中提取 SPS(type 7)/PPS(type 8) NALU（含起始码） */
@@ -136,11 +132,25 @@ public class VideoSink {
 
     public synchronized void stop() {
         running = false;
-        /* spsNal/ppsNal/csdConfigured 刻意保留：AirPlay 只在关键帧重发 SPS/PPS，
-           Surface 重建后带缓存 csd 启动可立即出画 */
-        if (thread != null) { thread.interrupt(); thread = null; }
-        if (codec != null) { codec.stop(); codec.release(); codec = null; }
+        /* spsNal/ppsNal/csdConfigured 刻意保留：Surface 重建后带缓存 csd 启动可立即出画 */
+        if (thread != null) {
+            thread.interrupt();
+            try { thread.join(500); } catch (InterruptedException ignored) { }
+            thread = null;
+        }
+        if (codec != null) {
+            try { codec.stop(); } catch (Exception ignored) { }
+            try { codec.release(); } catch (Exception ignored) { }   /* 无论如何都释放 Surface */
+            codec = null;
+        }
         queue.clear();
+    }
+
+    /** 解码线程发现解码器坏掉：停机，下一帧由 push 自动重建 */
+    private synchronized void markBroken(MediaCodec c) {
+        if (codec != c) return;
+        stop();
+        retryAfter = System.currentTimeMillis() + 300;
     }
 
     /** 从输出格式解析实际显示尺寸：优先 crop 裁剪框（硬解常带对齐 padding），否则退回 width/height */
@@ -168,11 +178,11 @@ public class VideoSink {
     }
 
     /** 热循环：立即吞下全部输入并榨干全部输出（60fps 镜像流不能按 50ms 轮询慢慢来） */
-    private void loop() {
+    private void loop(MediaCodec codec) {
         try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); } catch (Exception ignored) { }
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         long ts = 0;
-        while (running) {
+        while (running && !Thread.currentThread().isInterrupted()) {
             try {
                 boolean fed = false;
                 byte[] nal;
@@ -207,6 +217,12 @@ public class VideoSink {
                 }
                 if (!fed && !got) Thread.sleep(10);   /* 空闲降温 */
             } catch (InterruptedException e) {
+                return;
+            } catch (IllegalStateException e) {   /* 含 CodecException：解码器已坏，重建 */
+                if (running) {
+                    android.util.Log.e("VideoSink", "解码器故障，重建", e);
+                    new Thread(() -> markBroken(codec)).start();
+                }
                 return;
             } catch (Exception e) {
                 if (running) android.util.Log.e("VideoSink", "解码异常", e);

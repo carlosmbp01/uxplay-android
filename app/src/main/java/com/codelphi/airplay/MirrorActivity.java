@@ -25,11 +25,10 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     private boolean wasMirroring;
     private final Runnable uiTick = new Runnable() {
         @Override public void run() {
-            boolean mirroring = NativeBridge.videoIdleMs() < 3000;
-            if (wasMirroring && !mirroring) showWaitingScreen();
-            wasMirroring = mirroring;
-            status.setVisibility(mirroring ? View.GONE : View.VISIBLE);
-            if (!mirroring) status.setText("等待 iPhone/Mac 连接…");
+            /* Mac 画面静止时不发帧：无帧 ≠ 断开，不能停解码器。会话结束只认 cSessionEnd */
+            if (NativeBridge.videoIdleMs() < 3000) wasMirroring = true;
+            status.setVisibility(wasMirroring ? View.GONE : View.VISIBLE);
+            if (!wasMirroring) status.setText("等待 iPhone/Mac 连接…");
             uiHandler.postDelayed(this, 1000);
         }
     };
@@ -131,6 +130,7 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     private void showWaitingScreen() {
         NativeBridge.getVideoSink().stop();
         runOnUiThread(() -> {
+            wasMirroring = false;
             clearSurfaceToBlack();
             status.setText("等待 iPhone/Mac 连接…");
             status.setVisibility(View.VISIBLE);
@@ -138,13 +138,11 @@ public class MirrorActivity extends Activity implements NativeBridge.Listener {
     }
 
     private void clearSurfaceToBlack() {
+        /* 不能 lockCanvas：会以 CPU 身份占住 Surface，之后 MediaCodec 永远连不上（黑屏）。
+           改为重建 Surface：INVISIBLE 销毁 → VISIBLE 新建，残留帧随之消失 */
         try {
-            SurfaceHolder h = surfaceView.getHolder();
-            if (!h.getSurface().isValid()) return;
-            android.graphics.Canvas c = h.lockCanvas(null);
-            if (c == null) return;
-            c.drawColor(android.graphics.Color.BLACK);
-            h.unlockCanvasAndPost(c);
+            surfaceView.setVisibility(View.INVISIBLE);
+            uiHandler.post(() -> surfaceView.setVisibility(View.VISIBLE));
         } catch (Exception e) {
             android.util.Log.w("MirrorActivity", "清除残留画面失败", e);
         }
